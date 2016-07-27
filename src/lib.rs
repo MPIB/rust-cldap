@@ -13,7 +13,7 @@ struct LDAP;
 #[repr(C)]
 struct LDAPMessage;
 #[repr(C)]
-struct LDAPControl;
+pub struct LDAPControl;
 #[repr(C)]
 struct BerElement;
 
@@ -57,7 +57,7 @@ impl RustLDAP {
     /// Create a new RustLDAP struct and use an ffi call to ldap_initialize to
     /// allocate and init a c LDAP struct. All of that is hidden inside of
     /// RustLDAP.
-    pub fn new(uri: &str) -> Result<RustLDAP, &str> {
+    pub fn new<'a>(uri: &'a str) -> Result<RustLDAP, &'static str> {
         unsafe {
             let cldap = Box::from_raw(ptr::null_mut());
             let ldap_ptr_ptr: *const *mut LDAP = &Box::into_raw(cldap);
@@ -78,22 +78,22 @@ impl RustLDAP {
 
     /// Perform a synchronos simple bind (ldap_simple_bind_s). The result is
     /// either Ok(LDAP_SUCCESS) or Err(ldap_err2string).
-    pub fn simple_bind(&self, who: &str, pass: &str) -> Result<i64, &str> {
+    pub fn simple_bind<'a, 'b>(&self, who: &'a str, pass: &'b str) -> Result<i64, &'static str> {
         let res = unsafe { ldap_simple_bind_s(self.ldap_ptr, who.as_ptr(), pass.as_ptr()) as i64};
-        if res < 0 {
+        if res != 0 {
             let raw_estr = unsafe { ldap_err2string(res as c_int) };
             return Err(unsafe { CStr::from_ptr(raw_estr).to_str().unwrap() });
         }
         Ok(res)
     }
 
-    pub fn simple_search(&self, base: &str, scope: i32) -> Result<Vec<HashMap<String,Vec<String>>>, &str> {
+    pub fn simple_search<'a>(&self, base: &'a str, scope: i32) -> Result<Vec<HashMap<String,Vec<String>>>, &'static str> {
         self.ldap_search(base, scope, None, None, false, None, None, ptr::null(), -1)
     }
 
     /// Expose a not very 'rust-y' api for ldap_search_ext_s. Ideally this will
     /// be used mainly internally and a simpler api is exposed to users.
-    fn ldap_search(&self, base: &str, scope: i32, filter: Option<&str>, attrs: Option<Vec<&str>>, attrsonly: bool, serverctrls: Option<*const *const LDAPControl>, clientctrls: Option<*const *const LDAPControl>, timeout: *const timeval, sizelimit: i32) -> Result<Vec<HashMap<String,Vec<String>>>, &str> {
+    pub fn ldap_search<'a, 'b, 'c>(&self, base: &'a str, scope: i32, filter: Option<&'b str>, attrs: Option<Vec<&'c str>>, attrsonly: bool, serverctrls: Option<*const *const LDAPControl>, clientctrls: Option<*const *const LDAPControl>, timeout: *const timeval, sizelimit: i32) -> Result<Vec<HashMap<String,Vec<String>>>, &'static str> {
 
         // Allocate a boxed pointer for our ldap message. We will need to call
         // ldap_msgfree on the raw pointer after we are done, and then
@@ -157,9 +157,8 @@ impl RustLDAP {
                     // we use ldap_memfree just below this to free the memory on the
                     // c side of things.
                     let tmp: String = CStr::from_ptr(attr)
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
+                        .to_string_lossy()
+                        .into_owned();
                     let raw_vals: *const *const c_char = ldap_get_values(
                         self.ldap_ptr,
                         entry,
@@ -170,9 +169,8 @@ impl RustLDAP {
                         raw_vals_len);
                     let values: Vec<String> = val_slice.iter().map(|ptr| {
                         CStr::from_ptr(*ptr)
-                            .to_str()
-                            .unwrap()
-                            .to_owned()}).collect();
+                            .to_string_lossy()
+                            .into_owned()}).collect();
                     map.insert(tmp, values);
                     ldap_value_free(raw_vals);
                     ldap_memfree(attr as *const c_void);
